@@ -1,0 +1,394 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+# Install packages
+install.packages("stats")
+install.packages("dendextend")
+
+# Load in packages
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(skimr)
+library(psych)
+library(Hmisc)
+library(corrplot)
+library(naniar)
+library(GGally)
+library(janitor)
+library(modelsummary)
+library(jtools)
+library(stats)
+library(formattable)
+library(dendextend)
+
+# Load in data
+df <- read_csv("cereal.csv")
+```
+
+
+PRELIM CHECK
+```{r}
+df %>% head()
+
+df %>%
+  gg_miss_var()
+```
+
+
+DESCRIPTIVES
+```{r}
+# Summary statistics - nutrient variables
+df %>%
+  select(calories, protein, fat, sodium, fiber, carbo, sugars, potass) %>%
+  psych::describe()
+
+# Summary statistics - other metric variables
+df %>%
+  select(weight, cups, rating) %>%
+  psych::describe()
+```
+
+RENAME MANUFACTURER VALUES
+```{r}
+df <- df %>%
+    mutate(mfr = recode(mfr,
+                        "A" = "American Home Food Products",
+                        "G" = "General Mills",
+                        "K" = "Kelloggs",
+                        "N" = "Nabisco",
+                        "P" = "Post",
+                        "Q" = "Quaker Oats",
+                        "R" = "Ralston Purina"))
+```
+
+SUMMARY STATISTICS
+```{r}
+
+```
+
+DESCRIPTIVES GROUPED BY VARIABLES
+```{r}
+# Group by manufacturer
+## Mean - protein, fat, fiber, carbo, sugars
+## Median - calories, sodium, potass
+df %>%
+  group_by(mfr) %>%
+  summarise(
+    mean_protein = round(mean(protein), digits = 3),
+    mean_fat = round(mean(fat), digits = 3),
+    mean_fiber = round(mean(fiber), digits = 3),
+    mean_carbo = round(mean(carbo), digits = 3),
+    mean_sugars = round(mean(sugars), digits = 3),
+    med_calories = median(calories),
+    med_sodium = median(sodium),
+    med_potass = median(potass)) -> sum_table
+
+# Reformat table
+colnames(sum_table) <- c("Manufacturer", 
+                         "Protein (Mean)",
+                         "Fat (Mean)",
+                         "Fiber (Mean)",
+                         "Carbs (Mean)",
+                         "Sugars (Mean)",
+                         "Calories (Median)",
+                         "Sodium (Median)",
+                         "Potassium (Median)")
+
+formattable(sum_table)
+
+```
+
+DISTRIBUTIONS & FREQUENCIES
+```{r}
+# Ratings
+df %>%
+  ggplot() + geom_histogram(aes(rating), bins = 25) +
+  theme_bw() +
+  labs(
+    x = "Rating",
+    y = "Number of Cereals"
+  )
+
+
+# Manufacturer
+df %>%
+  ggplot() + geom_bar(aes(mfr)) +
+  theme_bw(base_size = 18) +
+  labs(
+    x = "Manufacturer",
+    y = "Number of Cereal Brands"
+  ) + coord_flip()
+
+
+# Type (hot or cold) -- over 96% served cold
+df %>% 
+  tabyl(type) %>%
+  adorn_pct_formatting(digits = 2) %>%
+  adorn_totals()
+
+
+# Vitamins -- over 80% at 25%
+df %>% 
+  tabyl(vitamins) %>%
+  adorn_pct_formatting(digits = 2) %>%
+  adorn_totals()
+
+
+# Shelf -- 46.75% at shelf 3 (top); rest nearly evenly split at shelves 1 and 2
+df %>% 
+  tabyl(shelf) %>%
+  adorn_pct_formatting(digits = 2) %>%
+  adorn_totals()
+
+
+# Ratings by manufacturer
+df %>%
+  group_by(mfr) %>%
+  summarise(mean_rating = mean(rating)) %>%
+  ggplot(aes(x = mfr, y = mean_rating)) + geom_bar(stat = "identity") +
+  coord_flip() + theme_bw(base_size = 18) +
+  labs(
+    x = "Manufacturer",
+    y = "Average Rating"
+  )
+  
+```
+
+
+DIMENSION REDUCTION
+
+
+SCALE METRIC VARIABLES
+```{r}
+# protein, fat, sodium, fiber, carbo, sugars, potass
+df %>%
+  mutate(
+    scale_protein = scale(protein),
+    scale_fat = scale(fat),
+    scale_sodium = scale(sodium),
+    scale_fiber = scale(fiber),
+    scale_carbo = scale(carbo),
+    scale_sugars = scale(sugars),
+    scale_potass = scale(potass),
+    scale_calories = scale(calories)) -> df
+
+```
+
+VISUAL INSPECTION - CORRELATION MATRIX
+```{r}
+# Test 1
+df %>%
+  select(
+    scale_protein, scale_fat, scale_sodium,
+    scale_fiber, scale_carbo, scale_sugars, scale_potass,
+    scale_calories) %>%
+  as.matrix() %>% rcorr() -> df.corr
+
+corrplot(df.corr$r, method = "shade", order = "alphabet", type = "lower", addCoef.col = TRUE, tl.srt = 45, tl.pos = "ld")
+
+
+# Test 2 - take out sugars and fat and calories
+df %>%
+  select(
+    scale_protein, scale_sodium,
+    scale_fiber, scale_carbo, scale_potass) %>%
+  as.matrix() %>% rcorr() -> df.corr_2
+
+corrplot(df.corr_2$r, method = "shade", order = "alphabet", type = "lower", addCoef.col = TRUE, tl.srt = 45, tl.pos = "ld")
+
+```
+
+
+KMO, BARTLETT'S TEST
+```{r}
+# KMO
+KMO(df.corr$r) # Correlation matrix 1
+KMO(df.corr_2$r) # Correlation matrix 2 -- better score
+
+# Bartlett's
+cortest.bartlett(df.corr_2$r, n = 77) # Significant
+```
+
+DERIVING COMPONENTS
+```{r}
+# Scree plot with eigenvalue
+PCA <- principal(df.corr_2$r)
+plot(PCA$values, type = "lines")
+lines(rep(1, 5), col = "red")
+
+# Communalities
+PCA <- principal(df.corr_2$r, nfactors = 2)
+PCA$communality
+
+```
+
+PCA ROTATION
+```{r}
+# Orthogonal rotation - Varimax
+PCArotate <- principal(df.corr_2$r, nfactors = 2, rotate = "varimax")
+
+# Compare loadings to non-rotated solution
+PCAnotrotate <- principal(df.corr_2$r, nfactors = 2, rotate = "none")
+
+# Show loadings
+PCAnotrotate$loadings
+PCArotate$loadings
+
+```
+
+CREATE NEW VARIABLES
+```{r}
+# Use weights
+w <- as.matrix(PCArotate$weights)
+
+# Create labels and apply weights
+df %>%
+  mutate(
+    BloodSugarHealth = cbind(df$scale_protein, df$scale_fiber, df$scale_potass, df$scale_sodium, df$scale_carbo) %*% w[,1],
+    CarefulConsumption = cbind(df$scale_protein, df$scale_fiber, df$scale_potass, df$scale_sodium, df$scale_carbo) %*% w[,2]
+  ) %>%
+  {.} -> data.withpca
+
+```
+
+PLOT NEW VARIABLES (COMPONENTS)
+```{r}
+# Plot 2 new components
+data.withpca %>%
+  ggplot() + geom_point(aes(x = CarefulConsumption, y = BloodSugarHealth, color = factor(shelf))) +
+  theme_bw(base_size = 18)
+
+```
+
+
+CLUSTERING
+
+
+SELECT STANDARDIZED BASE VARIABLES
+```{r}
+# Scale/standardize 2 new variables for cluster input
+data.withpca %>%
+  mutate(
+    scaledBloodSugarHealth = scale(BloodSugarHealth),
+    scaledCarefulConsumption = scale(CarefulConsumption)
+  ) %>%
+  select(scaledBloodSugarHealth, scaledCarefulConsumption) %>% 
+  {.} -> data.scaledPCA
+
+```
+
+CREATE A DISTANCE MATRIX
+```{r}
+dist_mat <- dist(data.scaledPCA, method = "euclidean")
+```
+
+CLUSTER USING WARD'S METHOD
+```{r}
+hclust_ward <- hclust(dist_mat, method = "ward.D")
+```
+
+PLOT DENDROGRAM
+```{r}
+# See number of segments -- choose 4 later
+plot(hclust_ward) # 4 clusters
+
+# Plot dendrogram with colors - 3 clusters
+dend_obj <- as.dendrogram(hclust_ward)
+color_dend <- color_branches(dend_obj, k = 3)
+plot(color_dend)
+
+# Plot dendrogram with colors - 4 clusters
+dend_obj <- as.dendrogram(hclust_ward)
+color_dend <- color_branches(dend_obj, k = 4)
+plot(color_dend)
+
+```
+
+K-MEANS CLUSTERING
+```{r}
+# With starting point of 100, 3 clusters
+data.scaledPCA %>%
+  select(scaledBloodSugarHealth, scaledCarefulConsumption) %>% 
+  kmeans(., 3, nstart = 100) -> kclust
+
+# With starting point of 100, 4 clusters
+data.scaledPCA %>%
+  select(scaledBloodSugarHealth, scaledCarefulConsumption) %>% 
+  kmeans(., 4, nstart = 100) -> kclust
+
+# Add cluster as variable to data frame
+data.withpca$Cluster <-kclust$cluster
+
+```
+
+PLOT CLUSTERS
+```{r}
+data.withpca %>%
+  ggplot() + geom_point(aes(x = scaledCarefulConsumption, y = scaledBloodSugarHealth, color = factor(Cluster))) +
+  theme_bw(base_size = 18) +
+  labs(
+    x = "Careful Consumption",
+    y = "Blood Sugar Health"
+  )
+
+# Number of brands within each cluster
+table(data.withpca$Cluster)
+
+```
+
+CLUSTER ANALYSIS - DESCRIPTOR VARIABLES
+```{r}
+# Average ratings grouped by cluster
+data.withpca %>%
+  group_by(Cluster) %>%
+  summarise(mean_rating = mean(rating)) %>%
+  ggplot(aes(x = Cluster, y = mean_rating)) + geom_bar(stat = "identity") +
+  theme_bw(base_size = 18) +
+  labs(
+    x = "Cluster",
+    y = "Average Cereal Rating"
+  )
+
+# Average calories grouped by cluster
+data.withpca %>%
+  group_by(Cluster) %>%
+  summarise(mean_calories = mean(calories)) %>%
+  ggplot(aes(x = Cluster, y = mean_calories)) + geom_bar(stat = "identity") +
+  theme_bw(base_size = 18) +
+  labs(
+    x = "Cluster",
+    y = "Average Cereal Calories"
+  )
+
+# Manufacturer frequency (preference) by cluster
+data.withpca %>%
+  select(
+    Cluster,
+    mfr) %>%
+  group_by(Cluster) %>%
+  ggplot() + geom_bar(aes(mfr)) + coord_flip() + facet_wrap(Cluster~., scales = "free") +
+  theme_bw(base_size = 18) +
+  labs(
+    x = "Manufacturer",
+    y = "Number of Brands"
+  )
+
+# Shelf frequency (preference) by cluster
+data.withpca %>%
+  select(
+    Cluster,
+    shelf) %>%
+  group_by(Cluster) %>%
+  ggplot() + geom_bar(aes(shelf)) + coord_flip() + facet_wrap(Cluster~., scales = "free") +
+  theme_bw(base_size = 18) +
+  labs(
+    x = "Shelf",
+    y = "Number of Brands"
+  )
+
+```
+
